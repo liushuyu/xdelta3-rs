@@ -1,0 +1,13 @@
+[package]
+name = "xdelta3"
+version = "0.1.0"
+authors = ["liushuyu <liushuyu011@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+libc = "0.2.51"
+
+[build-dependencies]
+cc = "1.0"
+tempfile = "3.0.7"
+
