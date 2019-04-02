@@ -1,7 +1,6 @@
 extern crate cc;
 
 use std::env;
-use std::path::Path;
 use std::process::Command;
 
 use std::fs::remove_file;
