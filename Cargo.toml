@@ -3,6 +3,9 @@ name = "xdelta3"
 version = "0.1.0"
 authors = ["liushuyu <liushuyu011@gmail.com>"]
 edition = "2018"
+license = "Apache License 2.0"
+description = "Rust binding for xdelta3"
+repository = "https://github.com/liushuyu/xdelta3-rs"
 exclude = [
     "xdelta3/xdelta3/py-compile"
 ]
@@ -12,4 +15,4 @@ libc = "0.2.51"
 
 [build-dependencies]
 cc = "1.0"
-tempfile = "3.0.7"
+rand = "0.6.5"

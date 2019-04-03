@@ -3,9 +3,9 @@ extern crate cc;
 use std::env;
 use std::process::Command;
 
-use std::fs::remove_file;
+use rand::Rng;
+use std::fs::{remove_file, File};
 use std::io::Write;
-use tempfile;
 
 fn main() {
     let mut builder = cc::Build::new();
@@ -37,19 +37,22 @@ fn check_native_size(name: &str) -> String {
     let compiler = builder.get_compiler();
     let mut compile = Command::new(compiler.path().as_os_str());
     let test_code = format!("#include <stdint.h>\n#include <stdio.h>\nint main() {{printf(\"%lu\", sizeof({})); return 0;}}\n", name);
-    let test_binary_fn = format!("{}/test-{}", out_dir, name);
-    let mut test_source = tempfile::Builder::new()
-        .suffix(".c")
-        .tempfile_in(out_dir)
-        .expect("Error creating test compile files");
-    let test_source_fn = test_source.path().to_string_lossy();
+    // didn't use tempfile since tempfile was having issues on Windows
+    let mut rng = rand::thread_rng();
+    let test_binary_fn = format!("{}/test-{}", out_dir, rng.gen::<i32>());
+    let test_source_fn = format!("{}/test-{:x}.c", out_dir, rng.gen::<i32>());
+    let mut test_source = File::create(&test_source_fn).expect("Error creating test compile files");
+
     compile
         .args(compiler.args())
         .args(&[&test_source_fn, "-o", test_binary_fn.as_str()]);
     test_source
         .write_all(test_code.as_bytes())
         .expect("Error writing test compile files");
+    drop(test_source); // close the source file, otherwise there will be problems on Windows
     compile.output().expect("Error compiling test source");
+    remove_file(test_source_fn).ok();
+
     compile = Command::new(&test_binary_fn);
     let output = compile
         .output()
