@@ -26,7 +26,7 @@ extern "C" {
 }
 
 /// Function to generate the difference data
-/// 
+///
 /// This function is used to generate the difference data.
 /// The data in `src` will be treated as "original" data and the
 /// data in `input` will be treated as "after", "patched" or "expected" data
@@ -57,7 +57,7 @@ pub fn encode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// Function to decode the difference data
-/// 
+///
 /// This function is used to decode the difference data.
 /// The data in `src` will be treated as "original" data and the
 /// data in `input` will be treated as "difference" or "patch" data.

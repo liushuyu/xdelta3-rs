@@ -28,7 +28,10 @@ fn main() {
     builder.define("SHELL_TESTS", Some("0"));
 
     builder.include("xdelta3/xdelta3");
-    builder.file("xdelta3/xdelta3/xdelta3.c").warnings(false).compile("xdelta3");
+    builder
+        .file("xdelta3/xdelta3/xdelta3.c")
+        .warnings(false)
+        .compile("xdelta3");
 }
 
 fn check_native_size(name: &str) -> String {
@@ -43,13 +46,19 @@ fn check_native_size(name: &str) -> String {
     let test_source_fn = format!("{}/test-{:x}.c", out_dir, rng.gen::<i32>());
     let mut test_source = File::create(&test_source_fn).expect("Error creating test compile files");
 
-    compile
-        .args(compiler.args())
-        .args(&[&test_source_fn, "-o", test_binary_fn.as_str()]);
+    compile.args(compiler.args()).current_dir(out_dir);
+    if compiler.is_like_msvc() {
+        compile.args(&[&test_source_fn, &format!("/Fe{}", test_binary_fn)]);
+    } else {
+        compile.args(&[&test_source_fn, "-o", &test_binary_fn]);
+    }
     test_source
         .write_all(test_code.as_bytes())
         .expect("Error writing test compile files");
     drop(test_source); // close the source file, otherwise there will be problems on Windows
+    for &(ref a, ref b) in compiler.env().iter() {
+        compile.env(a, b);
+    }
     compile.output().expect("Error compiling test source");
     remove_file(test_source_fn).ok();
 

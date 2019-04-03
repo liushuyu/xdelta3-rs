@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use xdelta3::{decode, encode};
     use std::fs::File;
     use std::io::Read;
+    use xdelta3::{decode, encode};
 
     #[test]
     fn basic_recoding() {
@@ -23,9 +23,15 @@ mod tests {
         let mut patch_data = Vec::new();
         let mut correct_fixure = File::open(correct_fixure).expect("Failed to open reference");
         let mut correct_data = Vec::new();
-        original_fixure.read_to_end(&mut original_data).expect("Failed to read file");
-        patch_fixure.read_to_end(&mut patch_data).expect("Failed to read file");
-        correct_fixure.read_to_end(&mut correct_data).expect("Failed to read file");
+        original_fixure
+            .read_to_end(&mut original_data)
+            .expect("Failed to read file");
+        patch_fixure
+            .read_to_end(&mut patch_data)
+            .expect("Failed to read file");
+        correct_fixure
+            .read_to_end(&mut correct_data)
+            .expect("Failed to read file");
         let patched_data = decode(patch_data.as_slice(), original_data.as_slice()).unwrap();
         assert_eq!(patched_data, correct_data);
     }
