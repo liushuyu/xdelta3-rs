@@ -28,7 +28,7 @@ fn main() {
     builder.define("SHELL_TESTS", Some("0"));
 
     builder.include("xdelta3/xdelta3");
-    builder.file("xdelta3/xdelta3/xdelta3.c").compile("xdelta3");
+    builder.file("xdelta3/xdelta3/xdelta3.c").warnings(false).compile("xdelta3");
 }
 
 fn check_native_size(name: &str) -> String {
