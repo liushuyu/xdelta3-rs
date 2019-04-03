@@ -13,7 +13,7 @@ extern "C" {
         avail_output: c_uint,
         flags: c_int,
     ) -> c_int;
-    pub fn xd3_decode_memory(
+    fn xd3_decode_memory(
         input: *const uint8_t,
         input_size: c_uint,
         source: *const uint8_t,
@@ -25,12 +25,16 @@ extern "C" {
     ) -> c_int;
 }
 
-// input: after patch; src: original
+/// Function to generate the difference data
+/// 
+/// This function is used to generate the difference data.
+/// The data in `src` will be treated as "original" data and the
+/// data in `input` will be treated as "after", "patched" or "expected" data
 pub fn encode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
     unsafe {
         let input_len = input.len() as c_uint;
         let src_len = src.len() as c_uint;
-        let estimated_out_len = (input_len + src_len) + 20;
+        let estimated_out_len = (input_len + src_len) * 2;
         let mut avail_output = 0 as c_uint;
         let mut output = Vec::with_capacity(estimated_out_len as usize);
         let result = xd3_encode_memory(
@@ -52,12 +56,17 @@ pub fn encode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
-// input: patch stream; src: to be patched
+/// Function to decode the difference data
+/// 
+/// This function is used to decode the difference data.
+/// The data in `src` will be treated as "original" data and the
+/// data in `input` will be treated as "difference" or "patch" data.
+/// The returned `Vec` stores the data that has been patched
 pub fn decode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
     unsafe {
         let input_len = input.len() as c_uint;
         let src_len = src.len() as c_uint;
-        let estimated_out_len = (input_len + src_len) + 20;
+        let estimated_out_len = (input_len + src_len) * 2;
         let mut avail_output = 0 as c_uint;
         let mut output = Vec::with_capacity(estimated_out_len as usize);
         let result = xd3_decode_memory(
