@@ -43,6 +43,10 @@ fn check_native_size(name: &str) -> String {
     // didn't use tempfile since tempfile was having issues on Windows
     let mut rng = rand::thread_rng();
     let test_binary_fn = format!("{}/test-{}", out_dir, rng.gen::<i32>());
+
+    #[cfg(windows)]
+    let test_binary_fn = format!("{}.exe", test_binary_fn);
+
     let test_source_fn = format!("{}/test-{:x}.c", out_dir, rng.gen::<i32>());
     let mut test_source = File::create(&test_source_fn).expect("Error creating test compile files");
 
