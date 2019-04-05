@@ -1,0 +1,38 @@
+jobs:
+  - job: Linux
+    pool:
+      vmImage: 'ubuntu-16.04'
+    container: 'rust:1'
+    steps:
+      - bash: git submodule update --init --recursive
+        displayName: 'Fetch submodules'
+      - bash: "cargo build"
+        displayName: "Build xdelta3-rs"
+      - bash: "cargo test"
+        displayName: "Test xdelta3-rs"
+
+  - job: macOS
+    pool:
+      vmImage: 'macOS-10.13'
+    steps:
+      - bash: git submodule update --init --recursive
+        displayName: 'Fetch submodules'
+      - bash: sudo xcode-select -s /Applications/Xcode_10.1.app/Contents/Developer
+        displayName: 'Select XCode version'
+      - bash: curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y
+        displayName: "Install Rust"
+      - bash: $HOME/.cargo/bin/cargo build
+        displayName: "Build xdelta3-rs"
+      - bash: $HOME/.cargo/bin/cargo test
+        displayName: "Test xdelta3-rs"
+
+  - job: Windows
+    pool:
+      vmImage: 'windows-2019'
+    steps:
+      - bash: git submodule update --init --recursive
+        displayName: 'Fetch submodules'
+      - bash: curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y
+        displayName: "Install Rust"
+      - bash: $HOME/.cargo/bin/cargo build
+        displayName: "Build xdelta3-rs"
