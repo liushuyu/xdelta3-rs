@@ -36,3 +36,7 @@ jobs:
         displayName: "Install Rust"
       - bash: $HOME/.cargo/bin/cargo build
         displayName: "Build xdelta3-rs"
+      - bash: dos2unix xdelta3/xdelta3/examples/iOS/xdelta3-ios-test/xdelta3-ios-test/file_v{1,2}.bin
+        displayName: "Fix line ending of examples"
+      - bash: $HOME/.cargo/bin/cargo test
+        displayName: "Test xdelta3-rs"
