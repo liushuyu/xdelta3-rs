@@ -16,6 +16,7 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 libc = "0.2"
+futures = "0.3"
 
 [build-dependencies]
 cc = "1.0"
