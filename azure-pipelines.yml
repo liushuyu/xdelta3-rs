@@ -2,8 +2,11 @@ jobs:
   - job: Linux
     pool:
       vmImage: 'ubuntu-16.04'
-    container: 'rust:1'
     steps:
+      - bash: sudo apt-get install -y llvm-dev libclang-dev clang
+        displayName: 'Install deps'
+      - bash: curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y
+        displayName: "Install Rust"
       - bash: git submodule update --init --recursive
         displayName: 'Fetch submodules'
       - bash: "cargo build"
@@ -30,6 +33,8 @@ jobs:
     pool:
       vmImage: 'windows-2019'
     steps:
+      - bash: choco install llvm
+        displayName: 'Install deps'
       - bash: git submodule update --init --recursive
         displayName: 'Fetch submodules'
       - bash: curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y
