@@ -1,3 +1,4 @@
+extern crate bindgen;
 extern crate cc;
 
 use std::env;
@@ -6,9 +7,14 @@ use std::process::Command;
 use rand::Rng;
 use std::fs::{remove_file, File};
 use std::io::Write;
+use std::path::PathBuf;
+
+fn add_def(v: &mut Vec<(String, String)>, key: &str, val: &str) {
+    v.push((key.to_owned(), val.to_owned()));
+}
 
 fn main() {
-    let mut builder = cc::Build::new();
+    let mut defines = Vec::new();
     for i in &[
         "size_t",
         "unsigned int",
@@ -16,22 +22,49 @@ fn main() {
         "unsigned long long",
     ] {
         let def_name = format!("SIZEOF_{}", i.to_uppercase().replace(" ", "_"));
-        builder.define(&def_name, Some(check_native_size(i).as_str()));
+        defines.push((def_name, check_native_size(i)));
     }
-    builder.define("SECONDARY_DJW", Some("1"));
-    builder.define("SECONDARY_FGK", Some("1"));
-    builder.define("EXTERNAL_COMPRESSION", Some("0"));
-    builder.define("XD3_USE_LARGEFILE64", Some("1"));
+    add_def(&mut defines, "SECONDARY_DJW", "1");
+    add_def(&mut defines, "SECONDARY_FGK", "1");
+    add_def(&mut defines, "EXTERNAL_COMPRESSION", "0");
+    add_def(&mut defines, "XD3_USE_LARGEFILE64", "1");
 
     #[cfg(windows)]
-    builder.define("XD3_WIN32", Some("1"));
-    builder.define("SHELL_TESTS", Some("0"));
+    add_def(&mut defines, "XD3_WIN32", "1");
+    add_def(&mut defines, "SHELL_TESTS", "0");
 
-    builder.include("xdelta3/xdelta3");
-    builder
-        .file("xdelta3/xdelta3/xdelta3.c")
-        .warnings(false)
-        .compile("xdelta3");
+    {
+        let mut builder = cc::Build::new();
+        builder.include("xdelta3/xdelta3");
+        for (key, val) in &defines {
+            builder.define(&key, Some(val.as_str()));
+        }
+
+        builder
+            .file("xdelta3/xdelta3/xdelta3.c")
+            .warnings(false)
+            .compile("xdelta3");
+    }
+
+    {
+        let mut builder = bindgen::Builder::default();
+
+        for (key, val) in &defines {
+            builder = builder.clang_arg(format!("-D{}={}", key, val));
+        }
+        let bindings = builder
+            .header("xdelta3/xdelta3/xdelta3.h")
+            .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+            .whitelist_function("xd3_.*")
+            .generate()
+            .expect("Unable to generate bindings");
+
+        // Write the bindings to the $OUT_DIR/bindings.rs file.
+        let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+        bindings
+            .write_to_file(out_path.join("bindings.rs"))
+            .expect("Couldn't write bindings!");
+    }
 }
 
 fn check_native_size(name: &str) -> String {
