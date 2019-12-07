@@ -125,3 +125,122 @@ pub fn decode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
         }
     }
 }
+
+pub fn decode2(input: &[u8], src_: &[u8]) -> Option<Vec<u8>> {
+    let mut stream: binding::xd3_stream = unsafe { std::mem::zeroed() };
+    let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
+
+    let ret = unsafe { binding::xd3_config_stream(&mut stream, &mut cfg) };
+    assert_eq!(ret, 0);
+
+    let mut src: binding::xd3_source = unsafe { std::mem::zeroed() };
+    src.max_winsize = 32768;
+    src.blksize = 32768;
+
+    let ret = unsafe { binding::xd3_set_source(&mut stream, &mut src) };
+    assert_eq!(ret, 0);
+
+    let mut out = Vec::new();
+    let mut count = 0;
+    let mut eof = false;
+    'outer: while !eof {
+        // xd3_avail_input
+        stream.next_in = input.as_ptr();
+        stream.avail_in = input.len() as u32;
+        // xd3_set_flags
+        stream.flags = binding::xd3_flags::XD3_FLUSH as i32;
+        eof = true;
+
+        'process: loop {
+            let ret: binding::xd3_rvalues =
+                unsafe { std::mem::transmute(binding::xd3_decode_input(&mut stream)) };
+
+            if stream.msg != std::ptr::null() {
+                println!("msg={:?}", unsafe { std::ffi::CStr::from_ptr(stream.msg) });
+            }
+
+            use binding::xd3_rvalues::*;
+            match ret {
+                XD3_INPUT => {
+                    println!("input");
+                    continue 'outer;
+                    //
+                }
+                XD3_OUTPUT => {
+                    println!("output");
+                    let out_data = unsafe {
+                        std::slice::from_raw_parts(stream.next_out, stream.avail_out as usize)
+                    };
+                    out.extend_from_slice(out_data);
+                    //
+                }
+                XD3_GETSRCBLK => {
+                    println!(
+                        "getsrcblk: curblkno={}, getblkno={} len={}",
+                        src.curblkno,
+                        src.getblkno,
+                        src_.len()
+                    );
+
+                    let blkno = src.getblkno as usize;
+                    let start = src.blksize as usize * blkno;
+                    let end = src.blksize as usize * (blkno + 1);
+                    let end = end.min(src_.len());
+
+                    let data = &src_[start..end];
+
+                    src.curblkno = src.getblkno;
+                    src.curblk = data.as_ptr();
+                    src.onblk = data.len() as u32;
+
+                    src.max_blkno = src.curblkno;
+                    src.onlastblk = src.onblk;
+                    src.eof_known = src_.is_empty() as i32;
+                }
+                XD3_GOTHEADER => {
+                    println!("gotheader");
+                    //
+                }
+                XD3_WINSTART => {
+                    println!("winstart");
+                    //
+                }
+                XD3_WINFINISH => {
+                    println!("winfinish");
+                    //
+                }
+                XD3_TOOFARBACK => {
+                    println!("toofarback");
+                    //
+                }
+                XD3_INTERNAL => {
+                    println!("internal");
+                    return None;
+                    //
+                }
+                XD3_INVALID => {
+                    println!("invalid");
+                    return None;
+                    //
+                }
+                XD3_INVALID_INPUT => {
+                    println!("invalid_input");
+                    return None;
+                    //
+                }
+                XD3_NOSECOND => {
+                    println!("nosecond");
+                    return None;
+                    //
+                }
+                XD3_UNIMPLEMENTED => {
+                    println!("unimplemented");
+                    return None;
+                    //
+                }
+            }
+        }
+    }
+
+    Some(out)
+}
