@@ -6,7 +6,7 @@ mod tests {
 
     fn decode2(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
         let mut out = Vec::new();
-        futures::executor::block_on(decode_async(input, src, &mut out));
+        futures::executor::block_on(decode_async(input, src, &mut out)).expect("failed to decode");
         Some(out)
     }
 
