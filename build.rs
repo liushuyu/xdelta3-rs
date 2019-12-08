@@ -33,6 +33,12 @@ fn main() {
     add_def(&mut defines, "XD3_WIN32", "1");
     add_def(&mut defines, "SHELL_TESTS", "0");
 
+    #[cfg(feature = "lzma")]
+    {
+        add_def(&mut defines, "SECONDARY_LZMA", "1");
+        pkg_config::Config::new().probe("liblzma").unwrap();
+    }
+
     {
         let mut builder = cc::Build::new();
         builder.include("xdelta3/xdelta3");

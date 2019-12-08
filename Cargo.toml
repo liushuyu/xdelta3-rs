@@ -21,3 +21,7 @@ libc = "0.2"
 cc = "1.0"
 rand = "0.6"
 bindgen = "0.52"
+pkg-config = { version = "0.3", optional = true }
+
+[features]
+lzma = ["pkg-config"]
