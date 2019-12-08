@@ -26,7 +26,5 @@ fn main() {
 
     let opt = Opt::from_args();
 
-    println!("hello, world!, opt={:?}", opt);
-
     async_std::task::block_on(run(opt));
 }
