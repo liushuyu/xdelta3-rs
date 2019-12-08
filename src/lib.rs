@@ -244,22 +244,44 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     }
 }
 
-pub async fn decode_async<R1, R2, W>(mut input: R1, src: R2, mut out: W)
+struct Xd3Stream {
+    inner: binding::xd3_stream,
+}
+impl Xd3Stream {
+    fn new() -> Self {
+        let inner: binding::xd3_stream = unsafe { std::mem::zeroed() };
+        return Self { inner };
+    }
+}
+impl Drop for Xd3Stream {
+    fn drop(&mut self) {
+        unsafe {
+            binding::xd3_free_stream(&mut self.inner as *mut _);
+        }
+    }
+}
+
+pub async fn decode_async<R1, R2, W>(mut input: R1, src: R2, mut out: W) -> Option<()>
 where
     R1: AsyncRead + Unpin,
     R2: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut stream: binding::xd3_stream = unsafe { std::mem::zeroed() };
+    let mut stream = Xd3Stream::new();
+    let stream = &mut stream.inner;
     let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
 
     let mut src_buf = SrcBuffer::new(src).await;
 
-    let ret = unsafe { binding::xd3_config_stream(&mut stream, &mut cfg) };
-    assert_eq!(ret, 0);
+    let ret = unsafe { binding::xd3_config_stream(stream, &mut cfg) };
+    if ret != 0 {
+        return None;
+    }
 
-    let ret = unsafe { binding::xd3_set_source(&mut stream, &mut src_buf.src) };
-    assert_eq!(ret, 0);
+    let ret = unsafe { binding::xd3_set_source(stream, &mut src_buf.src) };
+    if ret != 0 {
+        return None;
+    }
 
     let input_buf_size = stream.winsize as usize;
     debug!("stream.winsize={}", input_buf_size);
@@ -282,14 +304,15 @@ where
 
         'inner: loop {
             let ret: binding::xd3_rvalues =
-                unsafe { std::mem::transmute(binding::xd3_decode_input(&mut stream)) };
+                unsafe { std::mem::transmute(binding::xd3_decode_input(stream)) };
 
             if stream.msg != std::ptr::null() {
                 debug!("ret={:?}, msg={:?}", ret, unsafe {
                     std::ffi::CStr::from_ptr(stream.msg)
                 },);
+            } else {
+                debug!("ret={:?}", ret,);
             }
-            debug!("ret={:?}", ret,);
 
             use binding::xd3_rvalues::*;
             match ret {
@@ -310,14 +333,14 @@ where
                     src_buf.getblk().await;
                 }
                 XD3_GOTHEADER | XD3_WINSTART | XD3_WINFINISH => {
-                    //
+                    // do nothing
                 }
                 XD3_TOOFARBACK | XD3_INTERNAL | XD3_INVALID | XD3_INVALID_INPUT | XD3_NOSECOND
                 | XD3_UNIMPLEMENTED => {
-                    unimplemented!();
-                    //
+                    return None;
                 }
             }
         }
     }
+    Some(())
 }
