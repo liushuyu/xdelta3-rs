@@ -147,7 +147,7 @@ struct SrcBuffer<R> {
 }
 
 impl<R: AsyncRead + Unpin> SrcBuffer<R> {
-    async fn new(mut read: R) -> Self {
+    async fn new(mut read: R) -> Option<Self> {
         let block_count = 64;
         let max_winsize = XD3_DEFAULT_SRCWINSZ;
         let blksize = max_winsize / block_count;
@@ -159,10 +159,10 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         let mut buf = Vec::with_capacity(max_winsize);
         buf.resize(max_winsize, 0u8);
 
-        let read_len = read.read(&mut buf).await.unwrap();
+        let read_len = read.read(&mut buf).await.ok()?;
         debug!("SrcBuffer::new read_len={}", read_len);
 
-        Self {
+        Some(Self {
             src,
             read,
             read_len,
@@ -171,14 +171,14 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
             block_count,
             block_offset: 0,
             buf: buf.into_boxed_slice(),
-        }
+        })
     }
 
-    async fn fetch(&mut self) -> bool {
+    async fn fetch(&mut self) -> Option<bool> {
         let idx = self.block_offset;
         let r = self.block_range(idx);
         let block = &mut self.buf[r.clone()];
-        let read_len = self.read.read(block).await.unwrap();
+        let read_len = self.read.read(block).await.ok()?;
         debug!(
             "range={:?}, block_len={}, read_len={}",
             r,
@@ -189,22 +189,23 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         self.block_offset += 1;
         self.read_len += read_len;
 
-        read_len != block.len()
+        Some(read_len != block.len())
     }
 
-    async fn prepare(&mut self, idx: usize) {
+    async fn prepare(&mut self, idx: usize) -> Option<()> {
         while !self.eof_known && idx >= self.block_offset + self.block_count {
             debug!(
                 "prepare idx={}, block_offset={}, block_count={}",
                 idx, self.block_offset, self.block_count
             );
-            let eof = self.fetch().await;
+            let eof = self.fetch().await?;
             if eof {
                 debug!("eof");
                 self.eof_known = true;
                 break;
             }
         }
+        Some(())
     }
 
     fn block_range(&self, idx: usize) -> Range<usize> {
@@ -300,7 +301,7 @@ where
     let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
     cfg.winsize = XD3_DEFAULT_WINSIZE as u32;
 
-    let mut src_buf = SrcBuffer::new(src).await;
+    let mut src_buf = SrcBuffer::new(src).await?;
 
     let ret = unsafe { binding::xd3_config_stream(stream, &mut cfg) };
     if ret != 0 {
