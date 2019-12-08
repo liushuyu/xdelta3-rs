@@ -14,6 +14,7 @@
 extern crate libc;
 
 use libc::c_uint;
+use log::debug;
 
 #[allow(dead_code)]
 mod binding {
@@ -213,7 +214,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     }
 
     async fn getblk(&mut self) {
-        println!(
+        debug!(
             "getsrcblk: curblkno={}, getblkno={}",
             self.src.curblkno, self.src.getblkno,
         );
@@ -257,7 +258,7 @@ where
 
     'outer: while !eof {
         let read_size = input.read(&mut input_buf).await.unwrap();
-        println!("read_size={}", read_size);
+        debug!("read_size={}", read_size);
         if read_size == 0 {
             // xd3_set_flags
             stream.flags = binding::xd3_flags::XD3_FLUSH as i32;
@@ -273,7 +274,7 @@ where
                 unsafe { std::mem::transmute(binding::xd3_decode_input(&mut stream)) };
 
             if stream.msg != std::ptr::null() {
-                println!(
+                debug!(
                     "msg={:?}, ret={:?}",
                     unsafe { std::ffi::CStr::from_ptr(stream.msg) },
                     ret
@@ -283,12 +284,10 @@ where
             use binding::xd3_rvalues::*;
             match ret {
                 XD3_INPUT => {
-                    println!("input");
                     continue 'outer;
                     //
                 }
                 XD3_OUTPUT => {
-                    println!("output");
                     let out_data = unsafe {
                         std::slice::from_raw_parts(stream.next_out, stream.avail_out as usize)
                     };
