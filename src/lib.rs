@@ -148,7 +148,7 @@ struct SrcBuffer<R> {
 
 impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     async fn new(mut read: R) -> Self {
-        let block_count = 32;
+        let block_count = 64;
         let max_winsize = XD3_DEFAULT_SRCWINSZ;
         let blksize = max_winsize / block_count;
 
@@ -193,7 +193,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     }
 
     async fn prepare(&mut self, idx: usize) {
-        while idx >= self.block_offset + self.block_count {
+        while !self.eof_known && idx >= self.block_offset + self.block_count {
             debug!(
                 "prepare idx={}, block_offset={}, block_count={}",
                 idx, self.block_offset, self.block_count
@@ -238,9 +238,14 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         src.curblk = data.as_ptr();
         src.onblk = data.len() as u32;
 
-        src.max_blkno = src.curblkno;
-        src.onlastblk = src.onblk;
         src.eof_known = self.eof_known as i32;
+        if !self.eof_known {
+            src.max_blkno = src.curblkno;
+            src.onlastblk = src.onblk;
+        } else {
+            src.max_blkno = (self.block_offset + self.block_count - 1) as u64;
+            src.onlastblk = (self.read_len % src.blksize as usize) as u32;
+        }
     }
 }
 
@@ -261,7 +266,30 @@ impl Drop for Xd3Stream {
     }
 }
 
-pub async fn decode_async<R1, R2, W>(mut input: R1, src: R2, mut out: W) -> Option<()>
+pub async fn decode_async<R1, R2, W>(input: R1, src: R2, out: W) -> Option<()>
+where
+    R1: AsyncRead + Unpin,
+    R2: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    process_async(Mode::Decode, input, src, out).await
+}
+
+pub async fn encode_async<R1, R2, W>(input: R1, src: R2, out: W) -> Option<()>
+where
+    R1: AsyncRead + Unpin,
+    R2: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    process_async(Mode::Encode, input, src, out).await
+}
+
+enum Mode {
+    Encode,
+    Decode,
+}
+
+async fn process_async<R1, R2, W>(mode: Mode, mut input: R1, src: R2, mut out: W) -> Option<()>
 where
     R1: AsyncRead + Unpin,
     R2: AsyncRead + Unpin,
@@ -270,6 +298,7 @@ where
     let mut stream = Xd3Stream::new();
     let stream = &mut stream.inner;
     let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
+    cfg.winsize = XD3_DEFAULT_WINSIZE as u32;
 
     let mut src_buf = SrcBuffer::new(src).await;
 
@@ -292,7 +321,10 @@ where
     'outer: while !eof {
         let read_size = match input.read(&mut input_buf).await {
             Ok(n) => n,
-            Err(_e) => return None,
+            Err(_e) => {
+                debug!("error on read: {:?}", _e);
+                return None;
+            }
         };
         debug!("read_size={}", read_size);
         if read_size == 0 {
@@ -306,8 +338,12 @@ where
         stream.avail_in = read_size as u32;
 
         'inner: loop {
-            let ret: binding::xd3_rvalues =
-                unsafe { std::mem::transmute(binding::xd3_decode_input(stream)) };
+            let ret: binding::xd3_rvalues = unsafe {
+                std::mem::transmute(match mode {
+                    Mode::Encode => binding::xd3_encode_input(stream),
+                    Mode::Decode => binding::xd3_decode_input(stream),
+                })
+            };
 
             if stream.msg != std::ptr::null() {
                 debug!("ret={:?}, msg={:?}", ret, unsafe {
@@ -324,20 +360,19 @@ where
                     //
                 }
                 XD3_OUTPUT => {
-                    let out_data = unsafe {
+                    let mut out_data = unsafe {
                         std::slice::from_raw_parts(stream.next_out, stream.avail_out as usize)
                     };
-                    match out.write(out_data).await {
-                        Ok(n) => {
-                            if out_data.len() != n {
-                                // partial write
+                    while !out_data.is_empty() {
+                        let n = match out.write(out_data).await {
+                            Ok(n) => n,
+                            Err(_e) => {
+                                debug!("error on write: {:?}", _e);
                                 return None;
                             }
-                        }
-                        Err(_e) => {
-                            return None;
-                        }
-                    };
+                        };
+                        out_data = &out_data[n..];
+                    }
 
                     // xd3_consume_output
                     stream.avail_out = 0;
@@ -355,5 +390,6 @@ where
             }
         }
     }
-    Some(())
+
+    out.flush().await.ok()
 }
