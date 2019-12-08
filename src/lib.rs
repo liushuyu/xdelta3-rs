@@ -290,7 +290,10 @@ where
     let mut eof = false;
 
     'outer: while !eof {
-        let read_size = input.read(&mut input_buf).await.unwrap();
+        let read_size = match input.read(&mut input_buf).await {
+            Ok(n) => n,
+            Err(_e) => return None,
+        };
         debug!("read_size={}", read_size);
         if read_size == 0 {
             // xd3_set_flags
@@ -324,7 +327,17 @@ where
                     let out_data = unsafe {
                         std::slice::from_raw_parts(stream.next_out, stream.avail_out as usize)
                     };
-                    out.write(out_data).await.unwrap();
+                    match out.write(out_data).await {
+                        Ok(n) => {
+                            if out_data.len() != n {
+                                // partial write
+                                return None;
+                            }
+                        }
+                        Err(_e) => {
+                            return None;
+                        }
+                    };
 
                     // xd3_consume_output
                     stream.avail_out = 0;
