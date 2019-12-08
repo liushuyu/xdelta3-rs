@@ -127,7 +127,8 @@ pub fn decode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
     }
 }
 
-use futures::io::*;
+use futures_io::*;
+use futures_util::io::*;
 use std::ops::Range;
 
 #[allow(unused)]
