@@ -253,21 +253,20 @@ where
     assert_eq!(ret, 0);
 
     let mut input_buf = [0u8; 1024 * 4];
+    let mut eof = false;
 
-    'outer: loop {
+    'outer: while !eof {
         let read_size = input.read(&mut input_buf).await.unwrap();
         println!("read_size={}", read_size);
         if read_size == 0 {
-            break;
+            // xd3_set_flags
+            stream.flags = binding::xd3_flags::XD3_FLUSH as i32;
+            eof = true;
         }
 
         // xd3_avail_input
         stream.next_in = input_buf.as_ptr();
         stream.avail_in = read_size as u32;
-        // xd3_set_flags
-        if read_size != input_buf.len() {
-            stream.flags = binding::xd3_flags::XD3_FLUSH as i32;
-        }
 
         loop {
             let ret: binding::xd3_rvalues =
