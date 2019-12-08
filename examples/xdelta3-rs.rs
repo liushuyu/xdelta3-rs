@@ -16,7 +16,9 @@ async fn run(opt: Opt) {
     let source = File::open(&opt.source).await.expect("File::open");
     let out = File::create(&opt.output).await.expect("File::create");
 
-    xdelta3::decode_async(input, source, out).await;
+    xdelta3::decode_async(input, source, out)
+        .await
+        .expect("failed to decode");
 }
 
 fn main() {
