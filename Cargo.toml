@@ -19,6 +19,11 @@ futures = "0.3"
 libc = "0.2"
 log = "0.4"
 
+[dev-dependencies]
+async-std = "1.2"
+env_logger = "0.7"
+structopt = "0.3"
+
 [build-dependencies]
 cc = "1.0"
 rand = "0.6"
@@ -27,3 +32,6 @@ pkg-config = { version = "0.3", optional = true }
 
 [features]
 lzma = ["pkg-config"]
+
+[[example]]
+name = "xdelta3-rs"

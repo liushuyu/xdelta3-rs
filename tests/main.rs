@@ -2,13 +2,28 @@
 mod tests {
     use std::fs::File;
     use std::io::Read;
-    use xdelta3::{decode, encode};
+    use xdelta3::*;
+
+    fn decode2(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
+        let mut out = Vec::new();
+        futures::executor::block_on(decode_async(input, src, &mut out));
+        Some(out)
+    }
+
+    fn check_decode(input: &[u8], src: &[u8]) -> Vec<u8> {
+        let out_mem = decode(input, src).expect("Failed to decode");
+        let out_async = decode2(input, src).expect("Failed to decode");
+
+        assert_eq!(out_mem, out_async);
+        out_mem
+    }
 
     #[test]
     fn basic_recoding() {
-        let result = encode(&[1, 2, 3, 4, 5, 6, 7], &[1, 2, 4, 4, 7, 6, 7]);
-        let recode = decode(result.unwrap().as_slice(), &[1, 2, 4, 4, 7, 6, 7]);
-        assert_eq!(recode.unwrap().as_slice(), &[1, 2, 3, 4, 5, 6, 7]);
+        let result =
+            encode(&[1, 2, 3, 4, 5, 6, 7], &[1, 2, 4, 4, 7, 6, 7]).expect("failed to encode");
+        let recode = check_decode(&result, &[1, 2, 4, 4, 7, 6, 7]);
+        assert_eq!(&recode, &[1, 2, 3, 4, 5, 6, 7]);
     }
 
     #[test]
@@ -32,8 +47,8 @@ mod tests {
         correct_fixure
             .read_to_end(&mut correct_data)
             .expect("Failed to read file");
-        let patched_data = decode(patch_data.as_slice(), original_data.as_slice()).unwrap();
+
+        let patched_data = check_decode(&patch_data, &original_data);
         assert_eq!(patched_data, correct_data);
     }
-
 }
