@@ -15,8 +15,8 @@ exclude = [
 maintenance = { status = "experimental" }
 
 [dependencies]
-futures-io = "0.3"
-futures-util = "0.3"
+futures-io = { version = "0.3", optional = true }
+futures-util = { version = "0.3", optional = true }
 libc = "0.2"
 log = "0.4"
 
@@ -33,7 +33,9 @@ bindgen = "0.52"
 pkg-config = { version = "0.3", optional = true }
 
 [features]
+default = ["stream"]
 lzma = ["pkg-config"]
+stream = ["futures-io", "futures-util"]
 
 [[example]]
 name = "xdelta3-rs"
