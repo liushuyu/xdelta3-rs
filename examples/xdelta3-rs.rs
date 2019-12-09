@@ -27,12 +27,12 @@ async fn run(opt: Opt) {
 
     match opt.mode {
         Mode::Decode => {
-            xdelta3::decode_async(input, source, out)
+            xdelta3::stream::decode_async(input, source, out)
                 .await
                 .expect("failed to decode");
         }
         Mode::Encode => {
-            xdelta3::encode_async(input, source, out)
+            xdelta3::stream::encode_async(input, source, out)
                 .await
                 .expect("failed to encode");
         }

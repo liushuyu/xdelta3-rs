@@ -2,14 +2,18 @@
 mod tests {
     use std::fs::File;
     use std::io::Read;
+    #[cfg(feature = "stream")]
+    use xdelta3::stream::*;
     use xdelta3::*;
 
+    #[cfg(feature = "stream")]
     fn encode2(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
         let mut out = Vec::new();
         futures::executor::block_on(encode_async(input, src, &mut out)).expect("failed to decode");
         Some(out)
     }
 
+    #[cfg(feature = "stream")]
     fn decode2(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
         let mut out = Vec::new();
         futures::executor::block_on(decode_async(input, src, &mut out)).expect("failed to decode");
@@ -18,9 +22,11 @@ mod tests {
 
     fn check_decode(input: &[u8], src: &[u8]) -> Vec<u8> {
         let out_mem = decode(input, src).expect("Failed to decode");
-        let out_async = decode2(input, src).expect("Failed to decode");
-
-        assert_eq!(out_mem, out_async);
+        #[cfg(feature = "stream")]
+        {
+            let out_async = decode2(input, src).expect("Failed to decode");
+            assert_eq!(out_mem, out_async);
+        }
         out_mem
     }
 
@@ -53,6 +59,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "stream")]
     fn round_trip_test() {
         let fixure_path = "xdelta3/xdelta3/examples/iOS/xdelta3-ios-test/xdelta3-ios-test/";
         let source = read_file(&format!("{}/{}", fixure_path, "file_v1.bin"));
