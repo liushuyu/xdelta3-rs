@@ -13,6 +13,8 @@ jobs:
         displayName: "Build xdelta3-rs"
       - bash: "cargo test"
         displayName: "Test xdelta3-rs"
+      - bash: "cargo test --no-default-features --tests"
+        displayName: "Test xdelta3-rs (no-default-features)"
 
   - job: macOS
     pool:
@@ -28,6 +30,8 @@ jobs:
         displayName: "Build xdelta3-rs"
       - bash: $HOME/.cargo/bin/cargo test
         displayName: "Test xdelta3-rs"
+      - bash: $HOME/.cargo/bin/cargo test --no-default-features --tests
+        displayName: "Test xdelta3-rs (no-default-features)"
 
   - job: Windows
     pool:
@@ -45,3 +49,5 @@ jobs:
         displayName: "Fix line ending of examples"
       - bash: $HOME/.cargo/bin/cargo test
         displayName: "Test xdelta3-rs"
+      - bash: $HOME/.cargo/bin/cargo test --no-default-features --tests
+        displayName: "Test xdelta3-rs (no-default-features)"
