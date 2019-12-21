@@ -10,7 +10,7 @@ const XD3_DEFAULT_WINSIZE: usize = 1 << 23;
 const XD3_DEFAULT_SRCWINSZ: usize = 1 << 26;
 
 struct SrcBuffer<R> {
-    src: binding::xd3_source,
+    src: Box<binding::xd3_source>,
     read: R,
     read_len: usize,
     eof_known: bool,
@@ -26,7 +26,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         let max_winsize = XD3_DEFAULT_SRCWINSZ;
         let blksize = max_winsize / block_count;
 
-        let mut src: binding::xd3_source = unsafe { std::mem::zeroed() };
+        let mut src: Box<binding::xd3_source> = Box::new(unsafe { std::mem::zeroed() });
         src.blksize = blksize as u32;
         src.max_winsize = max_winsize as u64;
 
@@ -126,18 +126,20 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
 }
 
 struct Xd3Stream {
-    inner: binding::xd3_stream,
+    inner: Box<binding::xd3_stream>,
 }
 impl Xd3Stream {
     fn new() -> Self {
         let inner: binding::xd3_stream = unsafe { std::mem::zeroed() };
-        return Self { inner };
+        return Self {
+            inner: Box::new(inner),
+        };
     }
 }
 impl Drop for Xd3Stream {
     fn drop(&mut self) {
         unsafe {
-            binding::xd3_free_stream(&mut self.inner as *mut _);
+            binding::xd3_free_stream(self.inner.as_mut() as *mut _);
         }
     }
 }
@@ -160,42 +162,109 @@ where
     process_async(Mode::Encode, input, src, out).await
 }
 
+#[derive(Clone, Copy)]
 enum Mode {
     Encode,
     Decode,
 }
 
-async fn process_async<R1, R2, W>(mode: Mode, mut input: R1, src: R2, mut out: W) -> Option<()>
+async fn process_async<R1, R2, W>(mode: Mode, mut input: R1, src: R2, mut output: W) -> Option<()>
 where
     R1: AsyncRead + Unpin,
     R2: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut stream = Xd3Stream::new();
-    let stream = &mut stream.inner;
-    let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
-    cfg.winsize = XD3_DEFAULT_WINSIZE as u32;
+    let mut state = ProcessState::new(src)?;
 
-    let mut src_buf = SrcBuffer::new(src)?;
+    use binding::xd3_rvalues::*;
 
-    let ret = unsafe { binding::xd3_config_stream(stream, &mut cfg) };
-    if ret != 0 {
-        return None;
+    loop {
+        match state.step(mode) {
+            XD3_INPUT => {
+                if state.eof {
+                    break;
+                }
+                state.read_input(&mut input).await?;
+            }
+            XD3_OUTPUT => {
+                state.write_output(&mut output).await?;
+            }
+            XD3_GETSRCBLK => {
+                state.src_buf.getblk().await;
+            }
+            XD3_GOTHEADER | XD3_WINSTART | XD3_WINFINISH => {
+                // do nothing
+            }
+            XD3_TOOFARBACK | XD3_INTERNAL | XD3_INVALID | XD3_INVALID_INPUT | XD3_NOSECOND
+            | XD3_UNIMPLEMENTED => {
+                return None;
+            }
+        }
     }
 
-    let ret = unsafe { binding::xd3_set_source(stream, &mut src_buf.src) };
-    if ret != 0 {
-        return None;
+    output.flush().await.ok()
+}
+
+struct ProcessState<R> {
+    stream: Xd3Stream,
+    src_buf: SrcBuffer<R>,
+    input_buf: Vec<u8>,
+    eof: bool,
+}
+
+impl<R> ProcessState<R>
+where
+    R: AsyncRead + Unpin,
+{
+    fn new(src: R) -> Option<Self> {
+        let mut stream = Xd3Stream::new();
+        let stream0 = stream.inner.as_mut();
+        let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
+        cfg.winsize = XD3_DEFAULT_WINSIZE as u32;
+
+        let mut src_buf = SrcBuffer::new(src)?;
+
+        let ret = unsafe { binding::xd3_config_stream(stream0, &mut cfg) };
+        if ret != 0 {
+            return None;
+        }
+
+        let ret = unsafe { binding::xd3_set_source(stream0, src_buf.src.as_mut()) };
+        if ret != 0 {
+            return None;
+        }
+
+        let input_buf_size = stream0.winsize as usize;
+        debug!("stream.winsize={}", input_buf_size);
+        let mut input_buf = Vec::with_capacity(input_buf_size);
+        input_buf.resize(input_buf_size, 0u8);
+
+        Some(Self {
+            stream,
+            src_buf,
+            input_buf,
+            eof: false,
+        })
     }
 
-    let input_buf_size = stream.winsize as usize;
-    debug!("stream.winsize={}", input_buf_size);
-    let mut input_buf = Vec::with_capacity(input_buf_size);
-    input_buf.resize(input_buf_size, 0u8);
-    let mut eof = false;
+    fn step(&mut self, mode: Mode) -> binding::xd3_rvalues {
+        unsafe {
+            let stream = self.stream.inner.as_mut();
+            std::mem::transmute(match mode {
+                Mode::Encode => binding::xd3_encode_input(stream),
+                Mode::Decode => binding::xd3_decode_input(stream),
+            })
+        }
+    }
 
-    'outer: while !eof {
-        let read_size = match input.read(&mut input_buf).await {
+    async fn read_input<R2>(&mut self, mut input: R2) -> Option<()>
+    where
+        R2: Unpin + AsyncRead,
+    {
+        let input_buf = &mut self.input_buf;
+        let stream = self.stream.inner.as_mut();
+
+        let read_size = match input.read(input_buf).await {
             Ok(n) => n,
             Err(_e) => {
                 debug!("error on read: {:?}", _e);
@@ -206,66 +275,27 @@ where
         if read_size == 0 {
             // xd3_set_flags
             stream.flags = binding::xd3_flags::XD3_FLUSH as i32;
-            eof = true;
+            self.eof = true;
         }
 
         // xd3_avail_input
         stream.next_in = input_buf.as_ptr();
         stream.avail_in = read_size as u32;
-
-        'inner: loop {
-            let ret: binding::xd3_rvalues = unsafe {
-                std::mem::transmute(match mode {
-                    Mode::Encode => binding::xd3_encode_input(stream),
-                    Mode::Decode => binding::xd3_decode_input(stream),
-                })
-            };
-
-            if stream.msg != std::ptr::null() {
-                debug!("ret={:?}, msg={:?}", ret, unsafe {
-                    std::ffi::CStr::from_ptr(stream.msg)
-                },);
-            } else {
-                debug!("ret={:?}", ret,);
-            }
-
-            use binding::xd3_rvalues::*;
-            match ret {
-                XD3_INPUT => {
-                    continue 'outer;
-                    //
-                }
-                XD3_OUTPUT => {
-                    let mut out_data = unsafe {
-                        std::slice::from_raw_parts(stream.next_out, stream.avail_out as usize)
-                    };
-                    while !out_data.is_empty() {
-                        let n = match out.write(out_data).await {
-                            Ok(n) => n,
-                            Err(_e) => {
-                                debug!("error on write: {:?}", _e);
-                                return None;
-                            }
-                        };
-                        out_data = &out_data[n..];
-                    }
-
-                    // xd3_consume_output
-                    stream.avail_out = 0;
-                }
-                XD3_GETSRCBLK => {
-                    src_buf.getblk().await;
-                }
-                XD3_GOTHEADER | XD3_WINSTART | XD3_WINFINISH => {
-                    // do nothing
-                }
-                XD3_TOOFARBACK | XD3_INTERNAL | XD3_INVALID | XD3_INVALID_INPUT | XD3_NOSECOND
-                | XD3_UNIMPLEMENTED => {
-                    return None;
-                }
-            }
-        }
+        Some(())
     }
 
-    out.flush().await.ok()
+    async fn write_output<W>(&mut self, mut output: W) -> Option<()>
+    where
+        W: Unpin + AsyncWrite,
+    {
+        let stream = self.stream.inner.as_mut();
+
+        let out_data =
+            unsafe { std::slice::from_raw_parts(stream.next_out, stream.avail_out as usize) };
+        output.write_all(out_data).await.ok()?;
+
+        // xd3_consume_output
+        stream.avail_out = 0;
+        Some(())
+    }
 }
