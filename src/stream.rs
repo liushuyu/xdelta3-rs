@@ -21,7 +21,7 @@ struct SrcBuffer<R> {
 }
 
 impl<R: AsyncRead + Unpin> SrcBuffer<R> {
-    async fn new(mut read: R) -> Option<Self> {
+    fn new(read: R) -> Option<Self> {
         let block_count = 64;
         let max_winsize = XD3_DEFAULT_SRCWINSZ;
         let blksize = max_winsize / block_count;
@@ -32,15 +32,11 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
 
         let mut buf = Vec::with_capacity(max_winsize);
         buf.resize(max_winsize, 0u8);
-
-        let read_len = read.read(&mut buf).await.ok()?;
-        debug!("SrcBuffer::new read_len={}", read_len);
-
         Some(Self {
             src,
             read,
-            read_len,
-            eof_known: read_len != buf.len(),
+            read_len: 0,
+            eof_known: false,
 
             block_count,
             block_offset: 0,
@@ -67,6 +63,11 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     }
 
     async fn prepare(&mut self, idx: usize) -> Option<()> {
+        if self.read_len == 0 {
+            self.read_len = self.read.read(&mut self.buf).await.ok()?;
+            self.eof_known = self.read_len != self.buf.len();
+        }
+
         while !self.eof_known && idx >= self.block_offset + self.block_count {
             debug!(
                 "prepare idx={}, block_offset={}, block_count={}",
@@ -175,7 +176,7 @@ where
     let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
     cfg.winsize = XD3_DEFAULT_WINSIZE as u32;
 
-    let mut src_buf = SrcBuffer::new(src).await?;
+    let mut src_buf = SrcBuffer::new(src)?;
 
     let ret = unsafe { binding::xd3_config_stream(stream, &mut cfg) };
     if ret != 0 {
