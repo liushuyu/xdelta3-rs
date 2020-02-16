@@ -1,5 +1,6 @@
 use futures_io::*;
 use futures_util::io::*;
+use std::io;
 use std::ops::Range;
 
 use super::binding;
@@ -21,7 +22,7 @@ struct SrcBuffer<R> {
 }
 
 impl<R: AsyncRead + Unpin> SrcBuffer<R> {
-    fn new(read: R) -> Option<Self> {
+    fn new(read: R) -> io::Result<Self> {
         let block_count = 64;
         let max_winsize = XD3_DEFAULT_SRCWINSZ;
         let blksize = max_winsize / block_count;
@@ -32,7 +33,8 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
 
         let mut buf = Vec::with_capacity(max_winsize);
         buf.resize(max_winsize, 0u8);
-        Some(Self {
+
+        Ok(Self {
             src,
             read,
             read_len: 0,
@@ -44,11 +46,11 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         })
     }
 
-    async fn fetch(&mut self) -> Option<bool> {
+    async fn fetch(&mut self) -> io::Result<bool> {
         let idx = self.block_offset;
         let r = self.block_range(idx);
         let block = &mut self.buf[r.clone()];
-        let read_len = self.read.read(block).await.ok()?;
+        let read_len = self.read.read(block).await?;
         debug!(
             "range={:?}, block_len={}, read_len={}",
             r,
@@ -59,12 +61,12 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         self.block_offset += 1;
         self.read_len += read_len;
 
-        Some(read_len != block.len())
+        Ok(read_len != block.len())
     }
 
-    async fn prepare(&mut self, idx: usize) -> Option<()> {
+    async fn prepare(&mut self, idx: usize) -> io::Result<()> {
         if self.read_len == 0 {
-            self.read_len = self.read.read(&mut self.buf).await.ok()?;
+            self.read_len = self.read.read(&mut self.buf).await?;
             self.eof_known = self.read_len != self.buf.len();
         }
 
@@ -80,7 +82,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
                 break;
             }
         }
-        Some(())
+        Ok(())
     }
 
     fn block_range(&self, idx: usize) -> Range<usize> {
@@ -97,14 +99,14 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         start..end
     }
 
-    async fn getblk(&mut self) {
+    async fn getblk(&mut self) -> io::Result<()> {
         debug!(
             "getsrcblk: curblkno={}, getblkno={}",
             self.src.curblkno, self.src.getblkno,
         );
 
         let blkno = self.src.getblkno as usize;
-        self.prepare(blkno).await;
+        self.prepare(blkno).await?;
         let range = self.block_range(blkno);
 
         let src = &mut self.src;
@@ -122,6 +124,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
             src.max_blkno = (self.block_offset + self.block_count - 1) as u64;
             src.onlastblk = (self.read_len % src.blksize as usize) as u32;
         }
+        Ok(())
     }
 }
 
@@ -144,7 +147,7 @@ impl Drop for Xd3Stream {
     }
 }
 
-pub async fn decode_async<R1, R2, W>(input: R1, src: R2, out: W) -> Option<()>
+pub async fn decode_async<R1, R2, W>(input: R1, src: R2, out: W) -> io::Result<()>
 where
     R1: AsyncRead + Unpin,
     R2: AsyncRead + Unpin,
@@ -153,7 +156,7 @@ where
     process_async(Mode::Decode, input, src, out).await
 }
 
-pub async fn encode_async<R1, R2, W>(input: R1, src: R2, out: W) -> Option<()>
+pub async fn encode_async<R1, R2, W>(input: R1, src: R2, out: W) -> io::Result<()>
 where
     R1: AsyncRead + Unpin,
     R2: AsyncRead + Unpin,
@@ -168,7 +171,12 @@ enum Mode {
     Decode,
 }
 
-async fn process_async<R1, R2, W>(mode: Mode, mut input: R1, src: R2, mut output: W) -> Option<()>
+async fn process_async<R1, R2, W>(
+    mode: Mode,
+    mut input: R1,
+    src: R2,
+    mut output: W,
+) -> io::Result<()>
 where
     R1: AsyncRead + Unpin,
     R2: AsyncRead + Unpin,
@@ -190,19 +198,19 @@ where
                 state.write_output(&mut output).await?;
             }
             XD3_GETSRCBLK => {
-                state.src_buf.getblk().await;
+                state.src_buf.getblk().await?;
             }
             XD3_GOTHEADER | XD3_WINSTART | XD3_WINFINISH => {
                 // do nothing
             }
             XD3_TOOFARBACK | XD3_INTERNAL | XD3_INVALID | XD3_INVALID_INPUT | XD3_NOSECOND
             | XD3_UNIMPLEMENTED => {
-                return None;
+                return Err(io::Error::from(io::ErrorKind::Other));
             }
         }
     }
 
-    output.flush().await.ok()
+    output.flush().await
 }
 
 struct ProcessState<R> {
@@ -216,7 +224,7 @@ impl<R> ProcessState<R>
 where
     R: AsyncRead + Unpin,
 {
-    fn new(src: R) -> Option<Self> {
+    fn new(src: R) -> io::Result<Self> {
         let mut stream = Xd3Stream::new();
         let stream0 = stream.inner.as_mut();
         let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
@@ -226,12 +234,12 @@ where
 
         let ret = unsafe { binding::xd3_config_stream(stream0, &mut cfg) };
         if ret != 0 {
-            return None;
+            return Err(io::Error::from(io::ErrorKind::Other));
         }
 
         let ret = unsafe { binding::xd3_set_source(stream0, src_buf.src.as_mut()) };
         if ret != 0 {
-            return None;
+            return Err(io::Error::from(io::ErrorKind::Other));
         }
 
         let input_buf_size = stream0.winsize as usize;
@@ -239,7 +247,7 @@ where
         let mut input_buf = Vec::with_capacity(input_buf_size);
         input_buf.resize(input_buf_size, 0u8);
 
-        Some(Self {
+        Ok(Self {
             stream,
             src_buf,
             input_buf,
@@ -257,7 +265,7 @@ where
         }
     }
 
-    async fn read_input<R2>(&mut self, mut input: R2) -> Option<()>
+    async fn read_input<R2>(&mut self, mut input: R2) -> io::Result<()>
     where
         R2: Unpin + AsyncRead,
     {
@@ -268,10 +276,10 @@ where
             Ok(n) => n,
             Err(_e) => {
                 debug!("error on read: {:?}", _e);
-                return None;
+                return Err(io::Error::from(io::ErrorKind::Other));
             }
         };
-        debug!("read_size={}", read_size);
+
         if read_size == 0 {
             // xd3_set_flags
             stream.flags = binding::xd3_flags::XD3_FLUSH as i32;
@@ -281,10 +289,10 @@ where
         // xd3_avail_input
         stream.next_in = input_buf.as_ptr();
         stream.avail_in = read_size as u32;
-        Some(())
+        Ok(())
     }
 
-    async fn write_output<W>(&mut self, mut output: W) -> Option<()>
+    async fn write_output<W>(&mut self, mut output: W) -> io::Result<()>
     where
         W: Unpin + AsyncWrite,
     {
@@ -292,10 +300,10 @@ where
 
         let out_data =
             unsafe { std::slice::from_raw_parts(stream.next_out, stream.avail_out as usize) };
-        output.write_all(out_data).await.ok()?;
+        output.write_all(out_data).await?;
 
         // xd3_consume_output
         stream.avail_out = 0;
-        Some(())
+        Ok(())
     }
 }
