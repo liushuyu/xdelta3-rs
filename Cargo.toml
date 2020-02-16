@@ -16,7 +16,7 @@ maintenance = { status = "experimental" }
 
 [dependencies]
 futures-io = { version = "0.3", optional = true }
-futures-util = { version = "0.3", optional = true }
+futures-util = { version = "0.3", optional = true, features = ["io"] }
 libc = "0.2"
 log = "0.4"
 
