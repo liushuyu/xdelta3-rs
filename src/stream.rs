@@ -24,12 +24,12 @@ struct SrcBuffer<R> {
 impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     fn new(read: R) -> io::Result<Self> {
         let block_count = 64;
-        let max_winsize = XD3_DEFAULT_SRCWINSZ;
+        let max_winsize = XD3_DEFAULT_SRCWINSZ * 2;
         let blksize = max_winsize / block_count;
 
         let mut src: Box<binding::xd3_source> = Box::new(unsafe { std::mem::zeroed() });
         src.blksize = blksize as u32;
-        src.max_winsize = max_winsize as u64;
+        src.max_winsize = (max_winsize / 2) as u64;
 
         let mut buf = Vec::with_capacity(max_winsize);
         buf.resize(max_winsize, 0u8);
@@ -87,7 +87,13 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
 
     fn block_range(&self, idx: usize) -> Range<usize> {
         debug!("idx={}, offset={}", idx, self.block_offset);
-        assert!(idx >= self.block_offset && idx < self.block_offset + self.block_count);
+        assert!(
+            idx >= self.block_offset && idx < self.block_offset + self.block_count,
+            "invalid block, idx={}, offset={}, count={}",
+            idx,
+            self.block_offset,
+            self.block_count
+        );
 
         let idx = idx % self.block_count;
         let start = (self.src.blksize as usize) * idx;
