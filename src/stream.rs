@@ -335,7 +335,7 @@ where
 
         if read_size == 0 {
             // xd3_set_flags
-            stream.flags = binding::xd3_flags::XD3_FLUSH as i32;
+            stream.flags |= binding::xd3_flags::XD3_FLUSH as i32;
             self.eof = true;
         }
 
