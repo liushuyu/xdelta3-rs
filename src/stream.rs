@@ -134,6 +134,38 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     }
 }
 
+struct Xd3Config {
+    inner: Box<binding::xd3_config>,
+}
+
+impl Xd3Config {
+    pub fn new() -> Self {
+        let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
+        cfg.winsize = XD3_DEFAULT_WINSIZE as u32;
+
+        let config = Self {
+            inner: Box::new(cfg),
+        };
+        config
+    }
+
+    #[allow(unused)]
+    fn set_level(&mut self, mut level: i32) {
+        use binding::xd3_flags::*;
+
+        if level < 0 {
+            level = 0;
+        }
+        if level > 9 {
+            level = 9;
+        }
+        let flags = (self.inner.flags & (!(XD3_COMPLEVEL_MASK as i32)))
+            | (level << XD3_COMPLEVEL_SHIFT as i32);
+
+        self.inner.flags = flags;
+    }
+}
+
 struct Xd3Stream {
     inner: Box<binding::xd3_stream>,
 }
@@ -193,7 +225,8 @@ where
     use binding::xd3_rvalues::*;
 
     loop {
-        match state.step(mode) {
+        let res = state.step(mode);
+        match res {
             XD3_INPUT => {
                 if state.eof {
                     break;
@@ -211,7 +244,7 @@ where
             }
             XD3_TOOFARBACK | XD3_INTERNAL | XD3_INVALID | XD3_INVALID_INPUT | XD3_NOSECOND
             | XD3_UNIMPLEMENTED => {
-                return Err(io::Error::from(io::ErrorKind::Other));
+                return Err(io::Error::new(io::ErrorKind::Other, format!("{:?}", res)));
             }
         }
     }
@@ -220,6 +253,8 @@ where
 }
 
 struct ProcessState<R> {
+    #[allow(unused)]
+    cfg: Xd3Config,
     stream: Xd3Stream,
     src_buf: SrcBuffer<R>,
     input_buf: Vec<u8>,
@@ -233,19 +268,30 @@ where
     fn new(src: R) -> io::Result<Self> {
         let mut stream = Xd3Stream::new();
         let stream0 = stream.inner.as_mut();
-        let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
-        cfg.winsize = XD3_DEFAULT_WINSIZE as u32;
+
+        let mut cfg = Xd3Config::new();
+        let cfg0 = cfg.inner.as_mut();
 
         let mut src_buf = SrcBuffer::new(src)?;
 
-        let ret = unsafe { binding::xd3_config_stream(stream0, &mut cfg) };
+        let ret = unsafe { binding::xd3_config_stream(stream0, cfg0) };
         if ret != 0 {
-            return Err(io::Error::from(io::ErrorKind::Other));
+            let err = if stream0.msg == std::ptr::null() {
+                Error::new(io::ErrorKind::Other, "xd3_config_stream: null")
+            } else {
+                let msg = unsafe { std::ffi::CStr::from_ptr(stream0.msg) };
+
+                Error::new(
+                    io::ErrorKind::Other,
+                    format!("xd3_config_stream: {:?}, flags={:0b}", msg, stream0.flags),
+                )
+            };
+            return Err(err);
         }
 
         let ret = unsafe { binding::xd3_set_source(stream0, src_buf.src.as_mut()) };
         if ret != 0 {
-            return Err(io::Error::from(io::ErrorKind::Other));
+            return Err(io::Error::new(io::ErrorKind::Other, "xd3_set_source"));
         }
 
         let input_buf_size = stream0.winsize as usize;
@@ -254,6 +300,7 @@ where
         input_buf.resize(input_buf_size, 0u8);
 
         Ok(Self {
+            cfg,
             stream,
             src_buf,
             input_buf,
@@ -282,7 +329,7 @@ where
             Ok(n) => n,
             Err(_e) => {
                 debug!("error on read: {:?}", _e);
-                return Err(io::Error::from(io::ErrorKind::Other));
+                return Err(io::Error::new(io::ErrorKind::Other, "xd3: read_input"));
             }
         };
 
