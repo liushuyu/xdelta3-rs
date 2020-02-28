@@ -6,9 +6,11 @@ use std::ops::Range;
 use super::binding;
 use log::debug;
 
-#[allow(unused)]
 const XD3_DEFAULT_WINSIZE: usize = 1 << 23;
 const XD3_DEFAULT_SRCWINSZ: usize = 1 << 26;
+#[allow(unused)]
+const XD3_DEFAULT_ALLOCSIZE: usize = 1 << 14;
+const XD3_DEFAULT_SPREVSZ: usize = 1 << 18;
 
 struct SrcBuffer<R> {
     src: Box<binding::xd3_source>,
@@ -23,13 +25,13 @@ struct SrcBuffer<R> {
 
 impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     fn new(read: R) -> io::Result<Self> {
-        let block_count = 64;
-        let max_winsize = XD3_DEFAULT_SRCWINSZ * 2;
+        let block_count = 32;
+        let max_winsize = XD3_DEFAULT_SRCWINSZ;
         let blksize = max_winsize / block_count;
 
         let mut src: Box<binding::xd3_source> = Box::new(unsafe { std::mem::zeroed() });
         src.blksize = blksize as u32;
-        src.max_winsize = (max_winsize / 2) as u64;
+        src.max_winsize = max_winsize as u64;
 
         let mut buf = Vec::with_capacity(max_winsize);
         buf.resize(max_winsize, 0u8);
@@ -142,6 +144,7 @@ impl Xd3Config {
     pub fn new() -> Self {
         let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
         cfg.winsize = XD3_DEFAULT_WINSIZE as u32;
+        cfg.sprevsz = XD3_DEFAULT_SPREVSZ as u32;
 
         let config = Self {
             inner: Box::new(cfg),
@@ -220,7 +223,8 @@ where
     R2: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let mut state = ProcessState::new(src)?;
+    let cfg = Xd3Config::new();
+    let mut state = ProcessState::new(cfg, src)?;
 
     use binding::xd3_rvalues::*;
 
@@ -265,11 +269,10 @@ impl<R> ProcessState<R>
 where
     R: AsyncRead + Unpin,
 {
-    fn new(src: R) -> io::Result<Self> {
+    fn new(mut cfg: Xd3Config, src: R) -> io::Result<Self> {
         let mut stream = Xd3Stream::new();
         let stream0 = stream.inner.as_mut();
 
-        let mut cfg = Xd3Config::new();
         let cfg0 = cfg.inner.as_mut();
 
         let mut src_buf = SrcBuffer::new(src)?;
@@ -288,6 +291,7 @@ where
             };
             return Err(err);
         }
+        log::info!("config={:?}", cfg0);
 
         let ret = unsafe { binding::xd3_set_source(stream0, src_buf.src.as_mut()) };
         if ret != 0 {
