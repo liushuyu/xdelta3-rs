@@ -12,15 +12,20 @@ const XD3_DEFAULT_SRCWINSZ: usize = 1 << 26;
 const XD3_DEFAULT_ALLOCSIZE: usize = 1 << 14;
 const XD3_DEFAULT_SPREVSZ: usize = 1 << 18;
 
+struct CacheEntry {
+    len: usize,
+    buf: Box<[u8]>,
+}
+
 struct SrcBuffer<R> {
     src: Box<binding::xd3_source>,
     read: R,
     read_len: usize,
     eof_known: bool,
 
-    block_count: usize,
     block_offset: usize,
-    buf: Box<[u8]>,
+    block_len: usize,
+    cache: BTreeMap<usize, CacheEntry>,
 }
 
 impl<R: AsyncRead + Unpin> SrcBuffer<R> {
@@ -29,12 +34,11 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         let max_winsize = XD3_DEFAULT_SRCWINSZ;
         let blksize = max_winsize / block_count;
 
+        let cache = BTreeMap::new();
+
         let mut src: Box<binding::xd3_source> = Box::new(unsafe { std::mem::zeroed() });
         src.blksize = blksize as u32;
         src.max_winsize = max_winsize as u64;
-
-        let mut buf = Vec::with_capacity(max_winsize);
-        buf.resize(max_winsize, 0u8);
 
         Ok(Self {
             src,
@@ -42,69 +46,34 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
             read_len: 0,
             eof_known: false,
 
-            block_count,
             block_offset: 0,
-            buf: buf.into_boxed_slice(),
+            block_len: blksize,
+            cache,
         })
     }
 
-    async fn fetch(&mut self) -> io::Result<bool> {
-        let idx = self.block_offset;
-        let r = self.block_range(idx);
-        let block = &mut self.buf[r.clone()];
-        let read_len = self.read.read(block).await?;
-        debug!(
-            "range={:?}, block_len={}, read_len={}",
-            r,
-            block.len(),
-            read_len
-        );
-
-        self.block_offset += 1;
-        self.read_len += read_len;
-
-        Ok(read_len != block.len())
-    }
-
-    async fn prepare(&mut self, idx: usize) -> io::Result<()> {
-        if self.read_len == 0 {
-            self.read_len = self.read.read(&mut self.buf).await?;
-            self.eof_known = self.read_len != self.buf.len();
-        }
-
-        while !self.eof_known && idx >= self.block_offset + self.block_count {
-            debug!(
-                "prepare idx={}, block_offset={}, block_count={}",
-                idx, self.block_offset, self.block_count
-            );
-            let eof = self.fetch().await?;
-            if eof {
-                debug!("eof");
-                self.eof_known = true;
+    async fn fetch(&mut self) -> Result<()> {
+        let mut buf = if self.cache.len() == self.block_offset + 1 {
+            let mut key = 0usize;
+            for (k, _v) in &self.cache {
+                key = *k;
                 break;
             }
+            self.cache.remove(&key).unwrap().buf
+        } else {
+            let mut v = Vec::with_capacity(self.block_len);
+            v.resize(self.block_len, 0);
+            v.into_boxed_slice()
+        };
+
+        let len = self.read.read(&mut buf).await?;
+        if len == 0 {
+            self.eof_known = true;
         }
+        let entry = CacheEntry { len, buf };
+        self.cache.insert(self.block_offset, entry);
+        self.block_offset += 1;
         Ok(())
-    }
-
-    fn block_range(&self, idx: usize) -> Range<usize> {
-        debug!("idx={}, offset={}", idx, self.block_offset);
-        assert!(
-            idx >= self.block_offset && idx < self.block_offset + self.block_count,
-            "invalid block, idx={}, offset={}, count={}",
-            idx,
-            self.block_offset,
-            self.block_count
-        );
-
-        let idx = idx % self.block_count;
-        let start = (self.src.blksize as usize) * idx;
-        let end = (self.src.blksize as usize) * (idx + 1);
-
-        let start = start.min(self.read_len);
-        let end = end.min(self.read_len);
-
-        start..end
     }
 
     async fn getblk(&mut self) -> io::Result<()> {
@@ -114,22 +83,39 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         );
 
         let blkno = self.src.getblkno as usize;
-        self.prepare(blkno).await?;
-        let range = self.block_range(blkno);
+
+        let entry = loop {
+            match self.cache.get_mut(&blkno) {
+                Some(entry) => break entry,
+                None => {
+                    if blkno < self.block_offset {
+                        eprintln!("invalid blkno={}, offset={}", blkno, self.block_offset);
+                        for (k, _v) in &self.cache {
+                            eprintln!("key={:?}", k);
+                        }
+                        panic!("invalid blkno");
+                    }
+
+                    self.fetch().await?;
+                    continue;
+                }
+            }
+        };
 
         let src = &mut self.src;
-        let data = &self.buf[range];
+        let buf_len = entry.len;
+        let data = &entry.buf[..buf_len];
 
         src.curblkno = src.getblkno;
         src.curblk = data.as_ptr();
-        src.onblk = data.len() as u32;
+        src.onblk = buf_len as u32;
 
         src.eof_known = self.eof_known as i32;
         if !self.eof_known {
             src.max_blkno = src.curblkno;
             src.onlastblk = src.onblk;
         } else {
-            src.max_blkno = (self.block_offset + self.block_count - 1) as u64;
+            src.max_blkno = (self.block_offset - 1) as u64;
             src.onlastblk = (self.read_len % src.blksize as usize) as u32;
         }
         Ok(())
