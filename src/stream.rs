@@ -10,7 +10,7 @@ pub use binding::xd3_smatch_cfg;
 
 #[allow(unused)]
 const XD3_DEFAULT_WINSIZE: usize = 1 << 23;
-const XD3_DEFAULT_SRCWINSZ: usize = 1 << 26;
+const XD3_DEFAULT_SRCWINSZ: u64 = 1 << 26;
 #[allow(unused)]
 const XD3_DEFAULT_ALLOCSIZE: usize = 1 << 14;
 #[allow(unused)]
@@ -33,9 +33,9 @@ struct SrcBuffer<R> {
 }
 
 impl<R: AsyncRead + Unpin> SrcBuffer<R> {
-    fn new(read: R) -> io::Result<Self> {
+    fn new(cfg: &Xd3Config, read: R) -> io::Result<Self> {
         let block_count = 32;
-        let max_winsize = XD3_DEFAULT_SRCWINSZ;
+        let max_winsize = cfg.source_window_size;
         let blksize = max_winsize / block_count;
 
         let cache = BTreeMap::new();
@@ -51,7 +51,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
             eof_known: false,
 
             block_offset: 0,
-            block_len: blksize,
+            block_len: blksize as usize,
             cache,
         })
     }
@@ -128,6 +128,9 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
 
 pub struct Xd3Config {
     inner: Box<binding::xd3_config>,
+
+    // source config
+    source_window_size: u64,
 }
 
 impl Xd3Config {
@@ -138,6 +141,7 @@ impl Xd3Config {
 
         let config = Self {
             inner: Box::new(cfg),
+            source_window_size: XD3_DEFAULT_SRCWINSZ,
         };
         config
     }
@@ -151,6 +155,11 @@ impl Xd3Config {
     pub fn sprev_size(mut self, sprevsz: u32) -> Self {
         let inner = self.inner.as_mut();
         inner.sprevsz = sprevsz.next_power_of_two();
+        self
+    }
+
+    pub fn source_window_size(mut self, source_window_size: u64) -> Self {
+        self.source_window_size = source_window_size.next_power_of_two();
         self
     }
 
@@ -293,9 +302,8 @@ where
         let mut stream = Xd3Stream::new();
         let stream0 = stream.inner.as_mut();
 
+        let mut src_buf = SrcBuffer::new(&cfg, src)?;
         let cfg0 = cfg.inner.as_mut();
-
-        let mut src_buf = SrcBuffer::new(src)?;
 
         let ret = unsafe { binding::xd3_config_stream(stream0, cfg0) };
         if ret != 0 {
