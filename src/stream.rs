@@ -1,15 +1,19 @@
 use futures_io::*;
 use futures_util::io::*;
+use std::collections::BTreeMap;
 use std::io;
-use std::ops::Range;
 
 use super::binding;
 use log::debug;
 
+pub use binding::xd3_smatch_cfg;
+
+#[allow(unused)]
 const XD3_DEFAULT_WINSIZE: usize = 1 << 23;
 const XD3_DEFAULT_SRCWINSZ: usize = 1 << 26;
 #[allow(unused)]
 const XD3_DEFAULT_ALLOCSIZE: usize = 1 << 14;
+#[allow(unused)]
 const XD3_DEFAULT_SPREVSZ: usize = 1 << 18;
 
 struct CacheEntry {
@@ -122,7 +126,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     }
 }
 
-struct Xd3Config {
+pub struct Xd3Config {
     inner: Box<binding::xd3_config>,
 }
 
@@ -136,6 +140,34 @@ impl Xd3Config {
             inner: Box::new(cfg),
         };
         config
+    }
+
+    pub fn window_size(mut self, winsize: u32) -> Self {
+        let inner = self.inner.as_mut();
+        inner.winsize = winsize.next_power_of_two();
+        self
+    }
+
+    pub fn sprev_size(mut self, sprevsz: u32) -> Self {
+        let inner = self.inner.as_mut();
+        inner.sprevsz = sprevsz.next_power_of_two();
+        self
+    }
+
+    pub fn no_compress(mut self, no_compress: bool) -> Self {
+        let inner = self.inner.as_mut();
+        if no_compress {
+            inner.flags |= binding::xd3_flags::XD3_NOCOMPRESS as i32;
+        } else {
+            inner.flags &= !(binding::xd3_flags::XD3_NOCOMPRESS as i32);
+        }
+        self
+    }
+
+    pub fn set_smatch_config(mut self, smatch_cfg: binding::xd3_smatch_cfg) -> Self {
+        let inner = self.inner.as_mut();
+        inner.smatch_cfg = smatch_cfg;
+        self
     }
 
     #[allow(unused)]
@@ -180,7 +212,8 @@ where
     R2: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    process_async(Mode::Decode, input, src, out).await
+    let cfg = Xd3Config::new();
+    process_async(cfg, ProcessMode::Decode, input, src, out).await
 }
 
 pub async fn encode_async<R1, R2, W>(input: R1, src: R2, out: W) -> io::Result<()>
@@ -189,17 +222,19 @@ where
     R2: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    process_async(Mode::Encode, input, src, out).await
+    let cfg = Xd3Config::new();
+    process_async(cfg, ProcessMode::Encode, input, src, out).await
 }
 
 #[derive(Clone, Copy)]
-enum Mode {
+pub enum ProcessMode {
     Encode,
     Decode,
 }
 
-async fn process_async<R1, R2, W>(
-    mode: Mode,
+pub async fn process_async<R1, R2, W>(
+    cfg: Xd3Config,
+    mode: ProcessMode,
     mut input: R1,
     src: R2,
     mut output: W,
@@ -209,7 +244,6 @@ where
     R2: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let cfg = Xd3Config::new();
     let mut state = ProcessState::new(cfg, src)?;
 
     use binding::xd3_rvalues::*;
@@ -277,7 +311,7 @@ where
             };
             return Err(err);
         }
-        log::info!("config={:?}", cfg0);
+        log::trace!("config={:?}", cfg0);
 
         let ret = unsafe { binding::xd3_set_source(stream0, src_buf.src.as_mut()) };
         if ret != 0 {
@@ -298,12 +332,12 @@ where
         })
     }
 
-    fn step(&mut self, mode: Mode) -> binding::xd3_rvalues {
+    fn step(&mut self, mode: ProcessMode) -> binding::xd3_rvalues {
         unsafe {
             let stream = self.stream.inner.as_mut();
             std::mem::transmute(match mode {
-                Mode::Encode => binding::xd3_encode_input(stream),
-                Mode::Decode => binding::xd3_decode_input(stream),
+                ProcessMode::Encode => binding::xd3_encode_input(stream),
+                ProcessMode::Decode => binding::xd3_decode_input(stream),
             })
         }
     }
