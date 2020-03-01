@@ -42,7 +42,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
 
         let mut src: Box<binding::xd3_source> = Box::new(unsafe { std::mem::zeroed() });
         src.blksize = blksize as u32;
-        src.max_winsize = max_winsize as u64;
+        src.max_winsize = max_winsize;
 
         Ok(Self {
             src,
@@ -126,6 +126,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     }
 }
 
+#[derive(Debug)]
 pub struct Xd3Config {
     inner: Box<binding::xd3_config>,
 
@@ -179,8 +180,7 @@ impl Xd3Config {
         self
     }
 
-    #[allow(unused)]
-    fn set_level(&mut self, mut level: i32) {
+    pub fn level(mut self, mut level: i32) -> Self {
         use binding::xd3_flags::*;
 
         if level < 0 {
@@ -193,6 +193,7 @@ impl Xd3Config {
             | (level << XD3_COMPLEVEL_SHIFT as i32);
 
         self.inner.flags = flags;
+        self
     }
 }
 
@@ -290,6 +291,7 @@ struct ProcessState<R> {
     cfg: Xd3Config,
     stream: Xd3Stream,
     src_buf: SrcBuffer<R>,
+
     input_buf: Vec<u8>,
     eof: bool,
 }
@@ -299,13 +301,12 @@ where
     R: AsyncRead + Unpin,
 {
     fn new(mut cfg: Xd3Config, src: R) -> io::Result<Self> {
+        // log::info!("ProcessState::new config={:?}", cfg);
+
         let mut stream = Xd3Stream::new();
         let stream0 = stream.inner.as_mut();
 
-        let mut src_buf = SrcBuffer::new(&cfg, src)?;
-        let cfg0 = cfg.inner.as_mut();
-
-        let ret = unsafe { binding::xd3_config_stream(stream0, cfg0) };
+        let ret = unsafe { binding::xd3_config_stream(stream0, cfg.inner.as_mut()) };
         if ret != 0 {
             let err = if stream0.msg == std::ptr::null() {
                 Error::new(io::ErrorKind::Other, "xd3_config_stream: null")
@@ -319,8 +320,8 @@ where
             };
             return Err(err);
         }
-        log::trace!("config={:?}", cfg0);
 
+        let mut src_buf = SrcBuffer::new(&cfg, src)?;
         let ret = unsafe { binding::xd3_set_source(stream0, src_buf.src.as_mut()) };
         if ret != 0 {
             return Err(io::Error::new(io::ErrorKind::Other, "xd3_set_source"));
