@@ -81,9 +81,10 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     }
 
     async fn getblk(&mut self) -> io::Result<()> {
-        debug!(
+        trace!(
             "getsrcblk: curblkno={}, getblkno={}",
-            self.src.curblkno, self.src.getblkno,
+            self.src.curblkno,
+            self.src.getblkno,
         );
 
         let blkno = self.src.getblkno as usize;
@@ -328,7 +329,7 @@ where
         }
 
         let input_buf_size = stream0.winsize as usize;
-        debug!("stream.winsize={}", input_buf_size);
+        trace!("stream.winsize={}", input_buf_size);
         let mut input_buf = Vec::with_capacity(input_buf_size);
         input_buf.resize(input_buf_size, 0u8);
 
