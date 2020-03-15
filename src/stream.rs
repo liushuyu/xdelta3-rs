@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::io;
 
 use super::binding;
-use log::debug;
+use log::{debug, trace};
 
 pub use binding::xd3_smatch_cfg;
 
