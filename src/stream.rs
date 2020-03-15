@@ -32,7 +32,7 @@ struct SrcBuffer<R> {
     cache: BTreeMap<usize, CacheEntry>,
 }
 
-impl<R: AsyncRead + Unpin> SrcBuffer<R> {
+impl<R> SrcBuffer<R> {
     fn new(cfg: &Xd3Config, read: R) -> io::Result<Self> {
         let block_count = 32;
         let max_winsize = cfg.source_window_size;
@@ -55,7 +55,9 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
             cache,
         })
     }
+}
 
+impl<R: AsyncRead + Unpin> SrcBuffer<R> {
     async fn fetch(&mut self) -> Result<()> {
         let mut buf = if self.cache.len() == self.block_offset + 1 {
             let mut key = 0usize;
