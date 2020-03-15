@@ -72,11 +72,19 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
             v.into_boxed_slice()
         };
 
-        let len = self.read.read(&mut buf).await?;
-        if len == 0 {
-            self.eof_known = true;
+        let mut read_len = 0;
+
+        while read_len != buf.len() {
+            let len = self.read.read(&mut buf[read_len..]).await?;
+            if len == 0 {
+                self.eof_known = true;
+                break;
+            } else {
+                read_len += len;
+            }
         }
-        let entry = CacheEntry { len, buf };
+
+        let entry = CacheEntry { len: read_len, buf };
         self.cache.insert(self.block_offset, entry);
         self.block_offset += 1;
         Ok(())
