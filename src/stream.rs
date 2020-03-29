@@ -31,6 +31,7 @@ struct SrcBuffer<R> {
     block_len: usize,
     cache: BTreeMap<usize, CacheEntry>,
 }
+unsafe impl<R> Send for SrcBuffer<R> {}
 
 impl<R> SrcBuffer<R> {
     fn new(cfg: &Xd3Config, read: R) -> io::Result<Self> {
@@ -67,8 +68,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
             }
             self.cache.remove(&key).unwrap().buf
         } else {
-            let mut v = Vec::with_capacity(self.block_len);
-            v.resize(self.block_len, 0);
+            let v = vec![0u8; self.block_len];
             v.into_boxed_slice()
         };
 
@@ -144,6 +144,7 @@ pub struct Xd3Config {
     // source config
     source_window_size: u64,
 }
+unsafe impl Send for Xd3Config {}
 
 impl Xd3Config {
     pub fn new() -> Self {
@@ -226,6 +227,7 @@ impl Drop for Xd3Stream {
         }
     }
 }
+unsafe impl Send for Xd3Stream {}
 
 pub async fn decode_async<R1, R2, W>(input: R1, src: R2, out: W) -> io::Result<()>
 where
@@ -367,7 +369,6 @@ where
         R2: Unpin + AsyncRead,
     {
         let input_buf = &mut self.input_buf;
-        let stream = self.stream.inner.as_mut();
 
         let read_size = match input.read(input_buf).await {
             Ok(n) => n,
@@ -377,15 +378,18 @@ where
             }
         };
 
-        if read_size == 0 {
-            // xd3_set_flags
-            stream.flags |= binding::xd3_flags::XD3_FLUSH as i32;
-            self.eof = true;
+        {
+            let stream = self.stream.inner.as_mut();
+            if read_size == 0 {
+                // xd3_set_flags
+                stream.flags |= binding::xd3_flags::XD3_FLUSH as i32;
+                self.eof = true;
+            }
+            // xd3_avail_input
+            stream.next_in = input_buf.as_ptr();
+            stream.avail_in = read_size as u32;
         }
 
-        // xd3_avail_input
-        stream.next_in = input_buf.as_ptr();
-        stream.avail_in = read_size as u32;
         Ok(())
     }
 
@@ -393,14 +397,14 @@ where
     where
         W: Unpin + AsyncWrite,
     {
-        let stream = self.stream.inner.as_mut();
-
-        let out_data =
-            unsafe { std::slice::from_raw_parts(stream.next_out, stream.avail_out as usize) };
+        let out_data = {
+            let stream = self.stream.inner.as_mut();
+            unsafe { std::slice::from_raw_parts(stream.next_out, stream.avail_out as usize) }
+        };
         output.write_all(out_data).await?;
 
         // xd3_consume_output
-        stream.avail_out = 0;
+        self.stream.inner.as_mut().avail_out = 0;
         Ok(())
     }
 }
