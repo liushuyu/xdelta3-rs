@@ -61,8 +61,8 @@ fn main() {
         let bindings = builder
             .header("xdelta3/xdelta3/xdelta3.h")
             .parse_callbacks(Box::new(bindgen::CargoCallbacks))
-            .whitelist_function("xd3_.*")
-            .whitelist_type("xd3_.*")
+            .allowlist_function("xd3_.*")
+            .allowlist_type("xd3_.*")
             .rustified_enum("xd3_.*")
             .generate()
             .expect("Unable to generate bindings");
