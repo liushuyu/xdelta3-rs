@@ -128,3 +128,50 @@ pub fn decode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn roundtrip() {
+        let input = b"Hello, world! Hello, world!";
+        let src = b"Hello, world!";
+
+        let patch = encode(input, src).unwrap();
+        let output = decode(&patch, src).unwrap();
+
+        assert_eq!(output.as_slice(), input);
+    }
+
+    #[test]
+    fn roundtrip_process() {
+        use std::io::*;
+        use stream::*;
+
+        let src = b"Hello, world!".to_vec();
+        let input = b"Hello, world! Hello, world!".to_vec();
+
+        let mut patch = Vec::new();
+        process(
+            Xd3Config::new(),
+            ProcessMode::Encode,
+            input.as_slice(),
+            src.as_slice(),
+            &mut patch,
+        )
+        .unwrap();
+
+        let mut output = Vec::new();
+        process(
+            Xd3Config::new(),
+            ProcessMode::Decode,
+            patch.as_slice(),
+            src.as_slice(),
+            &mut output,
+        )
+        .unwrap();
+
+        assert_eq!(output, input);
+    }
+}
