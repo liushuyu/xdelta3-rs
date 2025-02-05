@@ -27,7 +27,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
         let blksize = max_winsize / block_count;
 
         let mut src: binding::xd3_source = unsafe { std::mem::zeroed() };
-        src.blksize = blksize as u32;
+        src.blksize = blksize as binding::usize_t;
         src.max_winsize = max_winsize as u64;
 
         let mut buf = Vec::with_capacity(max_winsize);
@@ -111,7 +111,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
 
         src.curblkno = src.getblkno;
         src.curblk = data.as_ptr();
-        src.onblk = data.len() as u32;
+        src.onblk = data.len() as binding::usize_t;
 
         src.eof_known = self.eof_known as i32;
         if !self.eof_known {
@@ -119,7 +119,7 @@ impl<R: AsyncRead + Unpin> SrcBuffer<R> {
             src.onlastblk = src.onblk;
         } else {
             src.max_blkno = (self.block_offset + self.block_count - 1) as u64;
-            src.onlastblk = (self.read_len % src.blksize as usize) as u32;
+            src.onlastblk = (self.read_len % src.blksize as usize) as binding::usize_t;
         }
     }
 }
@@ -130,7 +130,7 @@ struct Xd3Stream {
 impl Xd3Stream {
     fn new() -> Self {
         let inner: binding::xd3_stream = unsafe { std::mem::zeroed() };
-        return Self { inner };
+        Self { inner }
     }
 }
 impl Drop for Xd3Stream {
@@ -173,7 +173,7 @@ where
     let mut stream = Xd3Stream::new();
     let stream = &mut stream.inner;
     let mut cfg: binding::xd3_config = unsafe { std::mem::zeroed() };
-    cfg.winsize = XD3_DEFAULT_WINSIZE as u32;
+    cfg.winsize = XD3_DEFAULT_WINSIZE as binding::usize_t;
 
     let mut src_buf = SrcBuffer::new(src).await?;
 
@@ -204,15 +204,15 @@ where
         debug!("read_size={}", read_size);
         if read_size == 0 {
             // xd3_set_flags
-            stream.flags = binding::xd3_flags::XD3_FLUSH as i32;
+            stream.flags = binding::xd3_flags::XD3_FLUSH as u32;
             eof = true;
         }
 
         // xd3_avail_input
         stream.next_in = input_buf.as_ptr();
-        stream.avail_in = read_size as u32;
+        stream.avail_in = read_size as binding::usize_t;
 
-        'inner: loop {
+        loop {
             let ret: binding::xd3_rvalues = unsafe {
                 std::mem::transmute(match mode {
                     Mode::Encode => binding::xd3_encode_input(stream),

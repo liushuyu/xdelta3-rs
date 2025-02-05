@@ -1,8 +1,8 @@
 [package]
 name = "xdelta3"
-version = "0.1.5"
-authors = ["liushuyu <liushuyu011@gmail.com>", "Kay Lin <i@v2bv.net>"]
-edition = "2018"
+version = "0.1.8"
+authors = ["liushuyu <liushuyu011@gmail.com>", "Kay Lin <i@v2bv.net>", "Barrow099 <barrow099@gmail.com>"]
+edition = "2021"
 license = "Apache-2.0"
 description = "Rust binding for xdelta3"
 keywords = ["xdelta", "patch", "vcdiff"]
@@ -11,29 +11,27 @@ exclude = [
     "xdelta3/xdelta3/py-compile"
 ]
 
-[badges]
-maintenance = { status = "experimental" }
-
 [dependencies]
 futures-io = { version = "0.3", optional = true }
-futures-util = { version = "0.3", optional = true }
+futures-util = { version = "0.3", features = ["io"], optional = true }
 libc = "0.2"
 log = "0.4"
 
+
 [dev-dependencies]
-async-std = "1.2"
-env_logger = "0.7"
+async-std = "1.13"
+env_logger = "0.11"
 futures= "0.3"
 structopt = "0.3"
 
 [build-dependencies]
-cc = "1.0"
-rand = "0.6"
-bindgen = "0.52"
+cc = "1.2"
+rand = "0.9.0"
+bindgen = "0.71"
 pkg-config = { version = "0.3", optional = true }
 
 [features]
-default = ["stream"]
+default = []
 lzma = ["pkg-config"]
 stream = ["futures-io", "futures-util"]
 

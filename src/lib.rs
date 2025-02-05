@@ -13,13 +13,11 @@
 
 extern crate libc;
 
-use libc::c_uint;
-
 #[cfg(feature = "stream")]
 pub mod stream;
 
-#[allow(dead_code)]
 mod binding {
+    #![allow(dead_code)]
     #![allow(non_upper_case_globals)]
     #![allow(non_camel_case_types)]
     #![allow(non_snake_case)]
@@ -56,10 +54,10 @@ mod binding {
 /// for software updates or ROM patches), the patch data should be only a fraction of your updated file.
 pub fn encode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
     unsafe {
-        let input_len = input.len() as c_uint;
-        let src_len = src.len() as c_uint;
+        let input_len = input.len() as binding::usize_t;
+        let src_len = src.len() as binding::usize_t;
         let estimated_out_len = (input_len + src_len) * 2;
-        let mut avail_output = 0 as c_uint;
+        let mut avail_output = 0 as binding::usize_t;
         let mut output = Vec::with_capacity(estimated_out_len as usize);
         let result = binding::xd3_encode_memory(
             input.as_ptr(),
@@ -105,10 +103,10 @@ pub fn encode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
 /// ```
 pub fn decode(input: &[u8], src: &[u8]) -> Option<Vec<u8>> {
     unsafe {
-        let input_len = input.len() as c_uint;
-        let src_len = src.len() as c_uint;
+        let input_len = input.len() as binding::usize_t;
+        let src_len = src.len() as binding::usize_t;
         let estimated_out_len = (input_len + src_len) * 2;
-        let mut avail_output = 0 as c_uint;
+        let mut avail_output = 0 as binding::usize_t;
         let mut output = Vec::with_capacity(estimated_out_len as usize);
         let result = binding::xd3_decode_memory(
             input.as_ptr(),
